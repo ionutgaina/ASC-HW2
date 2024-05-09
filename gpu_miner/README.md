@@ -1,18 +1,41 @@
-Descriere:
+# Implementarea CUDA a algoritmului de consens Proof of Work din cadrul Bitcoin
 
-- Veți porni de la directorul gpu_miner, în care veți realiza implementarea în CUDA a logicii din cpu_miner.
-- Veți implementa funcția device findNonce, care va paraleliza căutarea nonce-ului, folosind CUDA Threads. Aceasta trebuie implementată astfel încât să caute prin toate numerele de la 1 la MAX_NONCE.
-- Pentru a va ajută, aveți deja implementate funcții ajutătoare în utils.cu. Vă recomandăm să va folosiți de ele în implementarea voastră.
-Nonce-ul găsit, hash-ul block-ului, precum și timpul rulării kernel-ului, vor fi scrise într-un fișier results.csv, în urmă apelarii funcției printResult din utils.cu.
+## Descriere
 
-Observații:
+Acest proiect reprezinta găsirea unei nonce care, atunci când se aplică o funcție hash, cum ar fi SHA-256, hash-ul va începe cu un număr de zero biți. Munca medie necesară este exponențială în funcție de numărul de biți zero necesari și poate fi verificată prin executarea unui singur hash.
 
-1. Compilarea si rularea temei se vor face EXCLUSIV pe coada xl. Nu este nevoie să modificăți nimic în Makefile, regulile sunt deja făcute. Tot ce trebuie să faceți este să apelați make, make run și make clean, ca la laborator.
-2. Veți modifica DOAR fișierul gpu_miner.cu. Celelate fișiere din directorul gpu_miner se vor suprascrie la testarea automată.
-3. Deși nonce-ul este un număr întreg, potiziv, pe 32 biți, MAX_NONCE pe GPU este setat cu valoarea 1e8, în loc de UINT32_MAX (~4.29 * 1e9). Motivul este de a reduce timpul și de a nu întâmpină bottleneck-uri când sunt trimise multe job-uri, în același timp, de la mai mulți studenți, pe coada xl.
+## Implementare
 
-Pași pentru rulare:
+Implementarea este realizată în limbajul de programare C++ și folosește biblioteca CUDA pentru a rula pe GPU. 
 
-1. To compile:  make
-2. To run:      make run
-3. To clean:    make clean
+### Main
+
+În fișierul `main.cu` se realizează citirea datelor de intrare, apelarea funcției de căutare a nonce-ului și afișarea rezultatului.
+
+Aici ca implementare am alocat memorie pe device pentru datele de intrare și rezultat care vor fi folosite în kernel-ul de căutare a nonce-ului.
+
+De asemenea aici am eliberat și memoria alocată pe device după ce am terminat de folosit datele.
+
+### Kernel
+
+Pentru funcția funcția de căutare a nonce-ului (findNonce), am folosit 256 de blocuri și 512 fire de execuție pe bloc, parametrii:
+
+- d_block_content - blocul precedent
+- d_block_hash - hash-ul pe care trebuie să-l obțin
+- d_nonce - nonce-ul care trebuie găsit
+- d_difficulty - dificultatea
+- current_length - dimensiunea blocului
+
+de asemenea am creat și o constantă globală pentru device, care reprezintă intervalul de căutare pentru fiecare fire de execuție.
+(i = start, end = start + interval)
+
+Am copiat datele din d_block_content pe device în d_block_content_copy, pentru a nu modifica blocul între thread-uri, d_block_content fiind un pointer.
+
+Am luat pentru fiecare thread un interval de căutare, și am verificat dacă hash-ul obținut începe cu numărul de biți zero necesari, dacă da, am setat nonce-ul și am terminat căutarea.
+
+Căutarea se termină când un thread găsește nonce-ul și setează flagul found, care este global pentru toate thread-urile sau când toate thread-urile au terminat căutarea.
+
+### Rezultate
+
+Am testat pe clusterul de la facultate și am obținut următoarele rezultate:
+

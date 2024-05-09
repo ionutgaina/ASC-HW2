@@ -6,7 +6,7 @@
 #include <inttypes.h>
 
 #define NUM_THREADS 512
-#define NUM_BLOCKS 256
+#define NUM_BLOCKS 1024
 
 __device__ bool found = false;
 __device__ uint64_t INTERVAL = MAX_NONCE / (NUM_THREADS * NUM_BLOCKS);
@@ -36,6 +36,7 @@ __global__ void findNonce(BYTE *block_content, BYTE *block_hash, uint64_t *nonce
         apply_sha256(block_content_copy, current_length + nounce_length, hash, 1);
         
         if (compare_hashes(hash, difficulty) <= 0 && !found) {
+            found = true;
             *nonce = i;
             d_strcpy((char*)block_hash, (const char*)hash);
             return;
