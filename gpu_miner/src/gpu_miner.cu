@@ -6,39 +6,48 @@
 #include <inttypes.h>
 
 #define NUM_THREADS 512
-#define NUM_BLOCKS 65000
+#define NUM_BLOCKS 256
 #define TOTAL_THREADS NUM_THREADS * NUM_BLOCKS
 
 __device__ bool found = false;
+__device__ uint64_t d_MAX_NOUNCE = 1e8;
+__device__ uint64_t d_NUM_BLOCKS = 256;
+__device__ uint64_t d_NUM_THREADS = 512;
+__device__ uint64_t d_TOTAL_THREADS = NUM_BLOCKS * NUM_THREADS;
 
-__global__ void findNonce(BYTE *block_content, BYTE *block_hash, uint64_t *nonce, size_t current_length, BYTE *difficulty) {
+__global__ void findNonce(BYTE *block_content, BYTE *block_hash, uint64_t *nonce, BYTE *difficulty, size_t current_length) {
     uint64_t index = threadIdx.x + blockIdx.x * blockDim.x;
 
     char nonce_string[NONCE_SIZE];
     BYTE hash[SHA256_HASH_SIZE];
+    BYTE block_content_copy[BLOCK_SIZE];
 
-    uint64_t start = index * (MAX_NONCE / TOTAL_THREADS);
-    uint64_t end = (index + 1) * (MAX_NONCE / TOTAL_THREADS) - 1;
+    d_strcpy((char*)block_content_copy, (const char*)block_content);
 
-    while (start < end) {
+    const double interval = d_MAX_NOUNCE / d_TOTAL_THREADS;
+
+    const uint64_t start = index * interval;
+    const uint64_t end = (index + 1) * interval;
+
+    uint64_t i = start;
+
+    while (i < end) {
         if (found) {
             return;
         } 
 
-        intToString(start, nonce_string);
-        d_strcpy((char*) block_content + current_length, nonce_string); // Overwrite previous nonce
-        apply_sha256(block_content, d_strlen((const char*)block_content), hash, 1);
-
+        int nounce_length = intToString(i, nonce_string);
+        d_strcpy((char*) block_content_copy + current_length, nonce_string); // Overwrite previous nonce
+        apply_sha256(block_content_copy, current_length + nounce_length, hash, 1);
 
         if (compare_hashes(hash, difficulty) <= 0 && !found) {
-            printf("Block hash found by thread %d\n", index);
             found = true;
-            *nonce = start;
+            *nonce = i;
             d_strcpy((char*)block_hash, (const char*)hash);
             return;
         }
 
-        start++;
+        i++;
     }
 }
 
@@ -48,7 +57,7 @@ int main(int argc, char **argv) {
             tx1234[SHA256_HASH_SIZE * 2], top_hash[SHA256_HASH_SIZE], block_content[BLOCK_SIZE];
     BYTE block_hash[SHA256_HASH_SIZE] = "0000000000000000000000000000000000000000000000000000000000000000";
     uint64_t nonce = 0;
-    size_t current_length;
+    size_t current_length = 0;
 
     // Top hash
     apply_sha256(tx1, strlen((const char*)tx1), hashed_tx1, 1);
@@ -68,7 +77,8 @@ int main(int argc, char **argv) {
     // prev_block_hash + top_hash
     strcpy((char*)block_content, (const char*)prev_block_hash);
     strcat((char*)block_content, (const char*)top_hash);
-    current_length = strlen((char*) block_content);
+
+    current_length = strlen((const char*)block_content);
 
     cudaEvent_t start, stop;
     startTiming(&start, &stop);
@@ -84,9 +94,8 @@ int main(int argc, char **argv) {
     cudaMemcpy(d_block_hash, block_hash, SHA256_HASH_SIZE, cudaMemcpyHostToDevice);
     cudaMemcpy(d_block_content, block_content, BLOCK_SIZE, cudaMemcpyHostToDevice);
     cudaMemcpy(d_difficulty, DIFFICULTY, SHA256_HASH_SIZE, cudaMemcpyHostToDevice);
-    cudaMemcpy(d_nonce, &nonce, sizeof(uint64_t), cudaMemcpyHostToDevice);
 
-    findNonce<<<655000, NUM_THREADS>>>(d_block_content, d_block_hash, d_nonce, current_length, d_difficulty);
+    findNonce<<<NUM_BLOCKS, NUM_THREADS>>>(d_block_content, d_block_hash, d_nonce, d_difficulty, current_length);
 
     cudaMemcpy(block_hash, d_block_hash, SHA256_HASH_SIZE, cudaMemcpyDeviceToHost);
     cudaMemcpy(&nonce, d_nonce, sizeof(uint64_t), cudaMemcpyDeviceToHost);
@@ -94,6 +103,7 @@ int main(int argc, char **argv) {
     cudaFree(d_block_content);
     cudaFree(d_block_hash);
     cudaFree(d_nonce);
+    cudaFree(d_difficulty);
 
     float seconds = stopTiming(&start, &stop);
     printResult(block_hash, nonce, seconds);
