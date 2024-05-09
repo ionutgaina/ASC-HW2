@@ -7,13 +7,10 @@
 
 #define NUM_THREADS 512
 #define NUM_BLOCKS 256
-#define TOTAL_THREADS NUM_THREADS * NUM_BLOCKS
 
 __device__ bool found = false;
-__device__ uint64_t d_MAX_NOUNCE = 1e8;
-__device__ uint64_t d_NUM_BLOCKS = 256;
-__device__ uint64_t d_NUM_THREADS = 512;
-__device__ uint64_t d_TOTAL_THREADS = NUM_BLOCKS * NUM_THREADS;
+__device__ uint64_t INTERVAL = MAX_NONCE / (NUM_THREADS * NUM_BLOCKS);
+
 
 __global__ void findNonce(BYTE *block_content, BYTE *block_hash, uint64_t *nonce, BYTE *difficulty, size_t current_length) {
     uint64_t index = threadIdx.x + blockIdx.x * blockDim.x;
@@ -24,10 +21,8 @@ __global__ void findNonce(BYTE *block_content, BYTE *block_hash, uint64_t *nonce
 
     d_strcpy((char*)block_content_copy, (const char*)block_content);
 
-    const double interval = d_MAX_NOUNCE / d_TOTAL_THREADS;
-
-    const uint64_t start = index * interval;
-    const uint64_t end = (index + 1) * interval;
+    const uint64_t start = index * INTERVAL;
+    const uint64_t end = (index + 1) * INTERVAL;
 
     uint64_t i = start;
 
@@ -39,9 +34,8 @@ __global__ void findNonce(BYTE *block_content, BYTE *block_hash, uint64_t *nonce
         int nounce_length = intToString(i, nonce_string);
         d_strcpy((char*) block_content_copy + current_length, nonce_string); // Overwrite previous nonce
         apply_sha256(block_content_copy, current_length + nounce_length, hash, 1);
-
+        
         if (compare_hashes(hash, difficulty) <= 0 && !found) {
-            found = true;
             *nonce = i;
             d_strcpy((char*)block_hash, (const char*)hash);
             return;
